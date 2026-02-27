@@ -1,6 +1,25 @@
 """
 VIGÍA
-Un sistema
+Herramienta ligera destinada al cotejo estadístico de variabilidad
+en las series numéricas.
+
+Bajo este módulo se articula un sistema práctico de detección de anomalías
+para el seguimiento de métricas operativas (por ejemplo:
+volumen de ingestas, registros diarios o cambios porcentuales).
+
+VIGÍA estima los límites inferiores y superiores de la serie
+partiendo de su comportamiento histórico, para lo cual selecciona
+el método estadístico más idóneo según la naturaleza de la distribución.
+
+Aunque podría aplicarse a cualquier serie numérica transformada,
+su uso principal yace en el monitoreo de la volatilidad en los 
+procesos de datos.
+En un principio fue diseñada como herramienta de gobierno de datos.
+
+Componentes principales:
+- Vigia: motor principal de evaluación.
+- ResultadoVigia: estructura de salida.
+- Estrategias de límite: métodos estadísticos intercambiables.
 """
 
 from .funciones import determinar_rango, estimar_comportamiento, determinar_limite, filtrar_extremos
@@ -13,12 +32,22 @@ class _EstrategiaLimite:
     def calcular(self, serie, superior: bool): pass
 
 class _MetodoTresSigmas(_EstrategiaLimite):
+    """
+    Realiza arbitrio estadístico basado en dispersión clásica. Determina el
+    umbral partiendo de la media y la desviación, suponiendo que los datos
+    guardan una compostura de normalidad.
+    """
     def calcular(auto, serie: pd.Series, superior: bool = True):
         desv, media = estimar_comportamiento(serie)
         limite = determinar_limite(media, desv, superior=superior)
         return limite
     
 class _MetodoRangoAjustado(_EstrategiaLimite):
+    """
+    Destinado a series de comportamiento errático. Amalgama el límite de
+    tres sigmas con el rango intercuartílico para ofrecer un umbral más
+    tolerante ante distribuciones que poseen colas pesadas.
+    """
     def calcular(auto, serie: pd.Series, superior: bool = True):
         desv, media = estimar_comportamiento(serie)
         limite_3s = determinar_limite(media, desv, superior=superior)
@@ -30,25 +59,24 @@ class _MetodoRangoAjustado(_EstrategiaLimite):
 
 class Vigia:
     """
-    Mecanismo estadístico adaptativo de detección de anomalías en
-    series univariadas.
-    
-    Estima límites inferiores y superiores a partir de la distribución
-    histórica de una serie numérica, seleccionando en automático el método
-    de cálculo según la curtosis de la distribución.
-    
-    Diseñado para operar sobre series previamente transformadas (por ejemplo,
-    tasas de cambio porcentual, diferencias absolutas o métricas normalizadas),
-    sin asumir el significado semántico de los datos.
-    
-    Características:
-    - Selección automática entre método Tres Sigmas y Rango Ajustado.
-    - Tolerancia a distribuciones multimodales y leptocúrticas.
-    - Filtrado previo de extremos.
-    - Evaluación binaria de anomalía respecto a límites estimados.
-    
-    El cálculo de transformaciones (como variación porcentual) debe realizarse
-    antes de invocar `evaluar`.
+    Detector adaptativo de anomalías para series numéricas históricas.
+
+    A partir de una serie de referencia, estima un rango esperado
+    (límite inferior y superior) y evalúa si un valor actual se
+    encuentra dentro de dicho rango.
+
+    El método de estimación se selecciona automáticamente según la
+    curtosis de la distribución histórica, alternando entre:
+    - Método Tres Sigmas (distribuciones regulares)
+    - Método Rango Ajustado (distribuciones pesadas o multimodales)
+
+    Fue concebido el motor para operar sobre series con previa transformación
+    (por ejemplo: variación porcentual diaria), sin suponer el significado
+    específico de la métrica que analiza.
+
+    Adviértase que no es cometido de esta clase realizar agregaciones
+    ni transformaciones internas. Estas tareas deben prepararse antes
+    de invocar el método `evaluar()`.
     """
     def __init__(
             auto,
@@ -102,6 +130,10 @@ class Vigia:
             serie: pd.Series,
             valor_actual: float,
     ):
+        """
+        Evalúa si un valor actual se encuentra dentro del rango normal
+        estimado a partir de la serie histórica.
+        """
         serie = filtrar_extremos(serie)
         if len(serie) < 5:
             return ResultadoVigia(
@@ -126,6 +158,11 @@ class Vigia:
         )
 
 class ResultadoVigia:
+    """
+    Contenedor de los productos del análisis.
+    Preserva tanto el veredicto de anomalía como los hitos estadísticos que
+    lo justifican.
+    """
     __slots__ = ["limite_inferior", "limite_superior", "valor_actual",
                  "es_anomalia", "metodo_utilizado", "tendencia"]
 
